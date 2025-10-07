@@ -1,0 +1,50 @@
+name: Daily green commit
+on:
+  schedule:
+    - cron: '0 0 * * *' # runs every day at 00:00 UTC
+  workflow_dispatch: {}  # allow manual runs
+
+jobs:
+  daily-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Git author (from secrets)
+        env:
+          GIT_NAME: ${{ secrets.GIT_NAME }}
+          GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
+        run: |
+          if [ -z "$GIT_NAME" ] || [ -z "$GIT_EMAIL" ]; then
+            echo "ERROR: please add GIT_NAME and GIT_EMAIL repository secrets."
+            exit 1
+          fi
+          git config user.name "$GIT_NAME"
+          git config user.email "$GIT_EMAIL"
+
+      - name: Run update script
+        run: bash scripts/update_activity.sh
+
+      - name: Commit & push (if changes)
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+        run: |
+          # detect branch (handle detached HEAD)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          if [ "$BRANCH" = "HEAD" ]; then
+            BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+          fi
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore(daily): update $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          # push using PAT so commit is authored as your user
+          git push "https://x-access-token:${GITHUB_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:$BRANCH
